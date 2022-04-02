@@ -41,6 +41,21 @@ subscription replace($input: SubscribeInput!) {
 }
 """
 
+id = 1
+
+def send_message(ws, message):
+  global id
+  _id = str(id)
+  id += 1
+  message['id'] = _id
+  ws.send(json.dumps(message))
+  while True:
+    d = json.loads(ws.recv())
+    if 'id' in d and d['id'] == _id:
+        data = d['payload']['data']['subscribe']['data']
+        if data['__typename'] == 'FullFrameMessageData':
+          return data['name']
+
 
 def get_image_url(token):
     ws = websocket.create_connection("wss://gql-realtime-2.reddit.com/query")
@@ -51,19 +66,13 @@ def get_image_url(token):
         }
     })
     ws.send(auth)
-    id = '1'
-    ws.send(json.dumps({'id': id, 'type': 'start', 'payload': {'variables': {'input': {'channel': {
-            'teamOwner': 'AFD2022', 'category': 'CANVAS', 'tag': '0'}}}, 'extensions': {}, 'operationName': 'replace', 'query': query}}))
-    name = None
-    while True:
-        d = json.loads(ws.recv())
-        if 'id' in d and d['id'] == id:
-            data = d['payload']['data']['subscribe']['data']
-            if data['__typename'] == 'FullFrameMessageData':
-                name = data['name']
-                break
+
+    name1 = send_message(ws, {'type': 'start', 'payload': {'variables': {'input': {'channel': {
+            'teamOwner': 'AFD2022', 'category': 'CANVAS', 'tag': '0'}}}, 'extensions': {}, 'operationName': 'replace', 'query': query}})
+    name2 = send_message(ws, {'type': 'start', 'payload': {'variables': {'input': {'channel': {
+            'teamOwner': 'AFD2022', 'category': 'CANVAS', 'tag': '1'}}}, 'extensions': {}, 'operationName': 'replace', 'query': query}})
     ws.close()
-    return name
+    return [name1, name2]
 
 
 if __name__ == "__main__":
@@ -76,11 +85,12 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     token = get_token()
-    url = get_image_url(token)
+    urls = get_image_url(token)
 
-    filename = str(math.floor(time.time())) + ".png"
-    path = os.path.join(output_dir, filename)
+    for i, url in enumerate(urls):
+      filename = "{}_{}.png".format(math.floor(time.time()), i)
+      path = os.path.join(output_dir, filename)
 
-    req = requests.get(url)
-    with open(path, "wb") as f:
-        f.write(req.content)
+      req = requests.get(url)
+      with open(path, "wb") as f:
+          f.write(req.content)
