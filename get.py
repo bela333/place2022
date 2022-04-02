@@ -21,7 +21,7 @@ def get_token():
     return token
 
 
-query = """
+frame_query = """
 subscription replace($input: SubscribeInput!) {
   subscribe(input: $input) {
     id
@@ -32,6 +32,32 @@ subscription replace($input: SubscribeInput!) {
           __typename
           name
           timestamp
+        }
+      }
+      __typename
+    }
+    __typename
+  }
+}
+"""
+
+config_query = """
+subscription configuration($input: SubscribeInput!) {
+  subscribe(input: $input) {
+    id
+    ... on BasicMessage {
+      data {
+        __typename
+        ... on ConfigurationMessageData {
+          canvasConfigurations {
+            index
+            dx
+            dy
+            __typename
+          }
+          canvasWidth
+          canvasHeight
+          __typename
         }
       }
       __typename
@@ -53,8 +79,25 @@ def send_message(ws, message):
     d = json.loads(ws.recv())
     if 'id' in d and d['id'] == _id:
         data = d['payload']['data']['subscribe']['data']
-        if data['__typename'] == 'FullFrameMessageData':
-          return data['name']
+        yield data
+
+def get_url(ws, tag):
+  messages = send_message(ws, {'type': 'start', 'payload': {'variables': {'input': {'channel': {
+          'teamOwner': 'AFD2022', 'category': 'CANVAS', 'tag': str(tag)}}}, 'extensions': {}, 'operationName': 'replace', 'query': frame_query}})
+  name = None
+  for message in messages:
+    if message['__typename'] == 'FullFrameMessageData':
+      name = message['name']
+      return name
+
+
+
+def get_canvas_configs(ws):
+  messages = send_message(ws, {'id': '1', 'type': 'start', 'payload': {'variables': {'input': {'channel': {'teamOwner': 'AFD2022', 'category': 'CONFIG'}}}, 'extensions': {}, 'operationName': 'configuration', 'query': config_query}})
+  for message in messages:
+    for config in message['canvasConfigurations']:
+      yield (config['index'], config['dx'], config['dy'])
+    return
 
 
 def get_image_url(token):
@@ -67,12 +110,15 @@ def get_image_url(token):
     })
     ws.send(auth)
 
-    name1 = send_message(ws, {'type': 'start', 'payload': {'variables': {'input': {'channel': {
-            'teamOwner': 'AFD2022', 'category': 'CANVAS', 'tag': '0'}}}, 'extensions': {}, 'operationName': 'replace', 'query': query}})
-    name2 = send_message(ws, {'type': 'start', 'payload': {'variables': {'input': {'channel': {
-            'teamOwner': 'AFD2022', 'category': 'CANVAS', 'tag': '1'}}}, 'extensions': {}, 'operationName': 'replace', 'query': query}})
+    names = []
+
+    for (i, x, y) in get_canvas_configs(ws):
+      names.append(get_url(ws, i))
+
+
+
     ws.close()
-    return [name1, name2]
+    return names
 
 
 if __name__ == "__main__":
