@@ -1,11 +1,15 @@
 use std::{
+    cell::RefCell,
     fs::File,
     io::{BufRead, BufReader},
     time::Instant,
 };
 
-use flate2::{read::GzDecoder};
-use rand::prelude::{IteratorRandom, SliceRandom};
+use flate2::read::GzDecoder;
+use rand::{
+    prelude::{IteratorRandom, SliceRandom},
+    Rng,
+};
 use tfrecord::{ExampleWriter, Feature, RecordWriter};
 
 #[derive(Debug)]
@@ -119,6 +123,7 @@ const IMAGE_SIZE: isize = 2000;
 const IMAGE_SIZEU: usize = IMAGE_SIZE as usize;
 
 const MARGIN: isize = 50;
+const MARGINU: usize = MARGIN as usize;
 const SIZE: isize = MARGIN * 2 + 1;
 const SIZEU: usize = SIZE as usize;
 
@@ -129,50 +134,120 @@ struct Example {
     palette_index: i64,
 }
 
-fn main() {
-    let start = Instant::now();
+fn choose_multiple<R, I: Iterator + Sized, O, F: FnMut(I::Item) -> O>(
+    mut iterator: I,
+    rng: &mut R,
+    amount: usize,
+    mut map: F,
+) -> Vec<O>
+where
+    R: Rng + ?Sized,
+{
+    let mut reservoir = Vec::with_capacity(amount);
+    reservoir.extend(iterator.by_ref().take(amount).map(|a| map(a)));
 
+    // Continue unless the iterator was exhausted
+    //
+    // note: this prevents iterators that "restart" from causing problems.
+    // If the iterator stops once, then so do we.
+    if reservoir.len() == amount {
+        for (i, elem) in iterator.enumerate() {
+            let k = gen_index(rng, i + 1 + amount);
+            if let Some(slot) = reservoir.get_mut(k) {
+                *slot = map(elem);
+            }
+        }
+    } else {
+        // Don't hang onto extra memory. There is a corner case where
+        // `amount` was much less than `self.len()`.
+        reservoir.shrink_to_fit();
+    }
+    reservoir
+}
+
+fn gen_index<R: Rng + ?Sized>(rng: &mut R, ubound: usize) -> usize {
+    if ubound <= (core::u32::MAX as usize) {
+        rng.gen_range(0..ubound as u32) as usize
+    } else {
+        rng.gen_range(0..ubound)
+    }
+}
+
+fn main() {
     let f = File::open("../sorted.csv.gz").unwrap();
     let f = GzDecoder::new(f);
     let f = BufReader::new(f);
     println!("Reading file");
+
+    let take_size = 156353085;
+    //let take_size = 1000000;
+
     //156353085: 160353085 total entries - 2000*2000 white pixels
     let entries = f
         .lines()
         .flatten()
         .map(|line| Entry::from_line(&line))
         .flatten()
-        .take(156353085);
-        //.take(1000000);
+        .take(take_size);
 
     let mut canvas = (0..IMAGE_SIZE * IMAGE_SIZE * 3)
         .map(|_| 1f32)
         .collect::<Vec<_>>();
+    let canvas = RefCell::new(canvas);
 
     let mut writer: ExampleWriter<_> = RecordWriter::create("dataset.tfrecord").unwrap();
 
+    let start = Instant::now();
+
+    let mut i = 0;
     let example_iterator = entries.map(|entry| {
+        i += 1;
+        if i % (take_size / 1000) == 0 {
+            let elapsed = start.elapsed();
+            let fract = i as f32 / take_size as f32;
+            let eta = elapsed.mul_f32((1.0 - fract) / fract);
+            println!(
+                "Decoding {}/{}. {:.2}% Elapsed: {:?} ETA: {:?}",
+                i,
+                take_size,
+                fract * 100.0,
+                elapsed,
+                eta
+            )
+        }
         let (x, y) = entry.pos;
 
-        let mut o = [1f32; SIZEU * SIZEU * 3];
-        window(&canvas, &mut o, x as isize - MARGIN, y as isize - MARGIN);
-
+        let mut canvas = canvas.borrow_mut();
         let index = (entry.pos.0 as usize + entry.pos.1 as usize * IMAGE_SIZE as usize) * 3;
+        let r = canvas[index];
+        let g = canvas[index + 1];
+        let b = canvas[index + 2];
         canvas[index] = entry.color.0;
         canvas[index + 1] = entry.color.1;
         canvas[index + 2] = entry.color.2;
 
-
-        let palette_index = entry.color.3;
-
-        Example {
-            image: o,
-            palette_index: palette_index as i64,
-        }
+        (x, y, r, g, b, entry.color.3)
     });
 
     let mut rng = rand::thread_rng();
-    let mut examples = example_iterator.choose_multiple(&mut rng, OUTPUT);
+    let mut examples = choose_multiple(
+        example_iterator,
+        &mut rng,
+        OUTPUT,
+        |(x, y, r, g, b, palette_index)| {
+            let canvas = canvas.borrow();
+            let mut o = [1f32; SIZEU * SIZEU * 3];
+            window(&canvas, &mut o, x as isize - MARGIN, y as isize - MARGIN);
+            let index = (SIZEU * MARGINU + MARGINU) * 3;
+            o[index] = r;
+            o[index + 1] = g;
+            o[index + 2] = b;
+            Example {
+                image: o,
+                palette_index: palette_index as i64,
+            }
+        },
+    );
 
     examples.shuffle(&mut rng); //Shuffle results
 
