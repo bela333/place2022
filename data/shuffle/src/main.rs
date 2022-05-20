@@ -1,13 +1,18 @@
-use std::{fs::File, io::{BufReader, BufRead, Write}, time::Instant};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    time::Instant,
+};
 
-use flate2::read::GzDecoder;
-
+use flate2::{read::GzDecoder};
+use rand::prelude::{IteratorRandom, SliceRandom};
+use tfrecord::{ExampleWriter, Feature, RecordWriter};
 
 #[derive(Debug)]
 struct Color(f32, f32, f32, u8);
 
-impl Color{
-    pub fn from_hex(hex: &str) -> Option<Color>{
+impl Color {
+    pub fn from_hex(hex: &str) -> Option<Color> {
         let palette_index = match hex {
             "7EED56" => 0,
             "BE0039" => 1,
@@ -41,26 +46,23 @@ impl Color{
             "E4ABFF" => 29,
             "2450A4" => 30,
             "00CC78" => 31,
-            _ => return None
+            _ => return None,
         };
-        let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32/255.0;
-        let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32/255.0;
-        let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32/255.0;
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32 / 255.0;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32 / 255.0;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32 / 255.0;
         Some(Color(r, g, b, palette_index))
     }
 }
 
-
 #[derive(Debug)]
-struct Entry{
+struct Entry {
     color: Color,
-    pos: (u16, u16)
+    pos: (u16, u16),
 }
 
-impl Entry{
-
-
-    pub fn from_line(line: &str) -> Option<Self>{
+impl Entry {
+    pub fn from_line(line: &str) -> Option<Self> {
         let mut parts = line.split(',').skip(2);
         let color = parts.next()?;
         let pos1 = parts.next()?;
@@ -69,94 +71,129 @@ impl Entry{
         let color = Color::from_hex(&color[1..])?;
 
         let x = pos1[1..].parse().ok()?;
-        let y = pos2[..pos2.len()-1].parse().ok()?;
+        let y = pos2[..pos2.len() - 1].parse().ok()?;
         let pos = (x, y);
 
         if parts.next().is_some() {
             return None;
         }
 
-        Some(Self{
-            color, pos
-        })
-
+        Some(Self { color, pos })
     }
 }
 
-
-
-
 fn window<T: Copy>(arr: &[T], buf: &mut [T], x: isize, y: isize) {
-    assert_eq!(buf.len() as isize, SIZE*SIZE*3);
+    assert_eq!(buf.len() as isize, SIZE * SIZE * 3);
     let (starty, dy) = if y < 0 {
         (0, -y as usize)
-    }else{(y as usize, 0)};
-    let endy = y+SIZE;
-    let endy = if endy >= IMAGE_SIZE {
-        IMAGE_SIZE
-    }else{endy} as usize;
+    } else {
+        (y as usize, 0)
+    };
+    let endy = y + SIZE;
+    let endy = if endy >= IMAGE_SIZE { IMAGE_SIZE } else { endy } as usize;
 
     let (startx, dx) = if x < 0 {
         (0, -x as usize)
-    }else{(x as usize, 0)};
-    let endx = x+SIZE;
-    let endx = if endx >= IMAGE_SIZE {
-        IMAGE_SIZE
-    }else{endx} as usize;
+    } else {
+        (x as usize, 0)
+    };
+    let endx = x + SIZE;
+    let endx = if endx >= IMAGE_SIZE { IMAGE_SIZE } else { endx } as usize;
 
-    let height = endy-starty;
-    let width = endx-startx;
+    let height = endy - starty;
+    let width = endx - startx;
 
     for _y in 0..height {
-        let y = starty+_y;
-        let dy = dy+_y;
-        let from_line = &arr[y*IMAGE_SIZEU*3..(y+1)*IMAGE_SIZEU*3];
-        let to_line = &mut buf[dy*SIZEU*3..(dy+1)*SIZEU*3];
+        let y = starty + _y;
+        let dy = dy + _y;
+        let from_line = &arr[y * IMAGE_SIZEU * 3..(y + 1) * IMAGE_SIZEU * 3];
+        let to_line = &mut buf[dy * SIZEU * 3..(dy + 1) * SIZEU * 3];
 
-        let from_line = &from_line[startx*3..(startx+width)*3];
-        let to_line = &mut to_line[dx*3..(dx+width)*3];
+        let from_line = &from_line[startx * 3..(startx + width) * 3];
+        let to_line = &mut to_line[dx * 3..(dx + width) * 3];
         to_line.copy_from_slice(from_line);
     }
-
 }
 
 const IMAGE_SIZE: isize = 2000;
 const IMAGE_SIZEU: usize = IMAGE_SIZE as usize;
 
 const MARGIN: isize = 50;
-const SIZE: isize = MARGIN*2+1;
+const SIZE: isize = MARGIN * 2 + 1;
 const SIZEU: usize = SIZE as usize;
 
-fn main() {
+const OUTPUT: usize = 64000;
 
+struct Example {
+    image: [f32; SIZEU * SIZEU * 3],
+    palette_index: i64,
+}
+
+fn main() {
     let start = Instant::now();
-    
+
     let f = File::open("../sorted.csv.gz").unwrap();
     let f = GzDecoder::new(f);
     let f = BufReader::new(f);
     println!("Reading file");
     //156353085: 160353085 total entries - 2000*2000 white pixels
-    let entries = f.lines().flatten().map(|line|Entry::from_line(&line)).flatten()
+    let entries = f
+        .lines()
+        .flatten()
+        .map(|line| Entry::from_line(&line))
+        .flatten()
         //.take(156353085);
         .take(1000000);
 
+    let mut canvas = (0..IMAGE_SIZE * IMAGE_SIZE * 3)
+        .map(|_| 1f32)
+        .collect::<Vec<_>>();
 
-    let mut canvas = (0..IMAGE_SIZE*IMAGE_SIZE*3).map(|_|1f32).collect::<Vec<_>>();
+    let mut writer: ExampleWriter<_> = RecordWriter::create("dataset.tfrecord").unwrap();
 
-    
-    for entry in entries {
+    let example_iterator = entries.map(|entry| {
         let (x, y) = entry.pos;
-        let index = (entry.pos.0 as usize + entry.pos.1 as usize*IMAGE_SIZE as usize)*3;
-        canvas[index  ] = entry.color.0;
-        canvas[index+1] = entry.color.1;
-        canvas[index+2] = entry.color.2;
+        let index = (entry.pos.0 as usize + entry.pos.1 as usize * IMAGE_SIZE as usize) * 3;
+        canvas[index] = entry.color.0;
+        canvas[index + 1] = entry.color.1;
+        canvas[index + 2] = entry.color.2;
 
-        let mut o = [1f32;(SIZE*SIZE*3) as usize];
-        window(&canvas, &mut o, x as isize-MARGIN, y as isize-MARGIN);
+        let mut o = [1f32; SIZEU * SIZEU * 3];
+        window(&canvas, &mut o, x as isize - MARGIN, y as isize - MARGIN);
 
         let palette_index = entry.color.3;
-    }
+
+        Example {
+            image: o,
+            palette_index: palette_index as i64,
+        }
+    });
+
+    let mut rng = rand::thread_rng();
+    let mut examples = example_iterator.choose_multiple(&mut rng, OUTPUT);
+
+    examples.shuffle(&mut rng); //Shuffle results
+
     println!("Elapsed: {:?}", start.elapsed());
+    println!("Generating file");
+    let start = Instant::now();
 
+    for (i, example) in examples.into_iter().enumerate() {
+        if i % (OUTPUT / 100) == 0 {
+            println!("Element {}/{} - {}%", i, OUTPUT, i * 100 / OUTPUT);
+        }
+        let window_feature = Feature::from_f32_iter(example.image.into_iter());
+        let index_feature = Feature::from_i64_list(vec![example.palette_index]);
 
+        let example = vec![
+            ("window".into(), window_feature),
+            ("index".into(), index_feature),
+        ]
+        .into_iter()
+        .collect::<tfrecord::Example>();
+
+        writer.send(example).unwrap();
+    }
+
+    println!("Elapsed: {:?}", start.elapsed());
 }
