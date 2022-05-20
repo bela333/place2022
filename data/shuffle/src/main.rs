@@ -48,6 +48,51 @@ impl Entry{
     }
 }
 
+
+
+
+fn window(arr: &[u8], buf: &mut [u8], x: isize, y: isize) {
+    assert_eq!(buf.len() as isize, SIZE*SIZE*3);
+    let (starty, dy) = if y < 0 {
+        (0, -y as usize)
+    }else{(y as usize, 0)};
+    let endy = y+SIZE;
+    let endy = if endy >= IMAGE_SIZE {
+        IMAGE_SIZE
+    }else{endy} as usize;
+
+    let (startx, dx) = if x < 0 {
+        (0, -x as usize)
+    }else{(x as usize, 0)};
+    let endx = x+SIZE;
+    let endx = if endx >= IMAGE_SIZE {
+        IMAGE_SIZE
+    }else{endx} as usize;
+
+    let height = endy-starty;
+    let width = endx-startx;
+
+    for _y in 0..height {
+        let y = starty+_y;
+        let dy = dy+_y;
+        let from_line = &arr[y*IMAGE_SIZEU*3..(y+1)*IMAGE_SIZEU*3];
+        let to_line = &mut buf[dy*SIZEU*3..(dy+1)*SIZEU*3];
+        let x = startx;
+        let dx = dx;
+        let from_line = &from_line[x*3..(x+width)*3];
+        let to_line = &mut to_line[dx*3..(dx+width)*3];
+        to_line.copy_from_slice(from_line);
+    }
+
+}
+
+const IMAGE_SIZE: isize = 2000;
+const IMAGE_SIZEU: usize = IMAGE_SIZE as usize;
+
+const MARGIN: isize = 50;
+const SIZE: isize = MARGIN*2+1;
+const SIZEU: usize = SIZE as usize;
+
 fn main() {
 
     let start = Instant::now();
@@ -62,16 +107,20 @@ fn main() {
         .take(1000000);
 
 
-    let mut canvas = (0..2000*2000*3).map(|_|255u8).collect::<Vec<_>>();
-
+    let mut canvas = (0..IMAGE_SIZE*IMAGE_SIZE*3).map(|_|255u8).collect::<Vec<_>>();
+    
     for entry in entries {
-        let index = (entry.pos.0 as usize + entry.pos.1 as usize*2000)*3;
+        let (x, y) = entry.pos;
+        let index = (entry.pos.0 as usize + entry.pos.1 as usize*IMAGE_SIZE as usize)*3;
         canvas[index  ] = entry.color.0;
         canvas[index+1] = entry.color.1;
         canvas[index+2] = entry.color.2;
+        
+        
+        let mut o = [255u8;(SIZE*SIZE*3) as usize];
+        window(&canvas, &mut o, x as isize-MARGIN, y as isize-MARGIN);
     }
-
-    File::create("output.bin").unwrap().write_all(&canvas).unwrap();
+    
 
     println!("Elapsed: {:?}", start.elapsed());
 
