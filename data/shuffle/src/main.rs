@@ -4,13 +4,13 @@ use flate2::read::GzDecoder;
 
 
 #[derive(Debug)]
-struct Color(u8, u8, u8);
+struct Color(f32, f32, f32);
 
 impl Color{
     pub fn from_hex(hex: &str) -> Option<Color>{
-        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32/255.0;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32/255.0;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32/255.0;
         Some(Color(r, g, b))
     }
 }
@@ -51,7 +51,7 @@ impl Entry{
 
 
 
-fn window(arr: &[u8], buf: &mut [u8], x: isize, y: isize) {
+fn window<T: Copy>(arr: &[T], buf: &mut [T], x: isize, y: isize) {
     assert_eq!(buf.len() as isize, SIZE*SIZE*3);
     let (starty, dy) = if y < 0 {
         (0, -y as usize)
@@ -77,9 +77,8 @@ fn window(arr: &[u8], buf: &mut [u8], x: isize, y: isize) {
         let dy = dy+_y;
         let from_line = &arr[y*IMAGE_SIZEU*3..(y+1)*IMAGE_SIZEU*3];
         let to_line = &mut buf[dy*SIZEU*3..(dy+1)*SIZEU*3];
-        let x = startx;
-        let dx = dx;
-        let from_line = &from_line[x*3..(x+width)*3];
+
+        let from_line = &from_line[startx*3..(startx+width)*3];
         let to_line = &mut to_line[dx*3..(dx+width)*3];
         to_line.copy_from_slice(from_line);
     }
@@ -107,7 +106,7 @@ fn main() {
         .take(1000000);
 
 
-    let mut canvas = (0..IMAGE_SIZE*IMAGE_SIZE*3).map(|_|255u8).collect::<Vec<_>>();
+    let mut canvas = (0..IMAGE_SIZE*IMAGE_SIZE*3).map(|_|1f32).collect::<Vec<_>>();
     
     for entry in entries {
         let (x, y) = entry.pos;
@@ -115,13 +114,11 @@ fn main() {
         canvas[index  ] = entry.color.0;
         canvas[index+1] = entry.color.1;
         canvas[index+2] = entry.color.2;
-        
-        
-        let mut o = [255u8;(SIZE*SIZE*3) as usize];
+
+        let mut o = [1f32;(SIZE*SIZE*3) as usize];
         window(&canvas, &mut o, x as isize-MARGIN, y as isize-MARGIN);
     }
-    
-
     println!("Elapsed: {:?}", start.elapsed());
+
 
 }
