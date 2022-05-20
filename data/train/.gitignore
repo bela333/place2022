@@ -1,4 +1,5 @@
 dataset.tfrecord
+validation.tfrecord
 venv
 chkpnt
 logs

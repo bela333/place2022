@@ -18,6 +18,7 @@ def _decode(record_bytes):
     return o['window'], o['index']
 
 dataset = tf.data.TFRecordDataset('dataset.tfrecord').map(_decode).batch(BATCHSIZE)
+validation = tf.data.TFRecordDataset('validation.tfrecord').map(_decode).batch(BATCHSIZE)
 
 
 def get_model():
@@ -48,4 +49,4 @@ checkpoint_callback = keras.callbacks.ModelCheckpoint(
 
 tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="logs")
 
-model.fit(dataset, epochs=10, callbacks=[checkpoint_callback, tensorboard_callback])
+model.fit(dataset, epochs=10, callbacks=[checkpoint_callback, tensorboard_callback], validation_data=validation)
