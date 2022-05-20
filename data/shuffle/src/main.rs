@@ -142,8 +142,8 @@ fn main() {
         .flatten()
         .map(|line| Entry::from_line(&line))
         .flatten()
-        //.take(156353085);
-        .take(1000000);
+        .take(156353085);
+        //.take(1000000);
 
     let mut canvas = (0..IMAGE_SIZE * IMAGE_SIZE * 3)
         .map(|_| 1f32)
@@ -153,13 +153,15 @@ fn main() {
 
     let example_iterator = entries.map(|entry| {
         let (x, y) = entry.pos;
+
+        let mut o = [1f32; SIZEU * SIZEU * 3];
+        window(&canvas, &mut o, x as isize - MARGIN, y as isize - MARGIN);
+
         let index = (entry.pos.0 as usize + entry.pos.1 as usize * IMAGE_SIZE as usize) * 3;
         canvas[index] = entry.color.0;
         canvas[index + 1] = entry.color.1;
         canvas[index + 2] = entry.color.2;
 
-        let mut o = [1f32; SIZEU * SIZEU * 3];
-        window(&canvas, &mut o, x as isize - MARGIN, y as isize - MARGIN);
 
         let palette_index = entry.color.3;
 
