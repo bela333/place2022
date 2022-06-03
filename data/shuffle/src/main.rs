@@ -1,19 +1,21 @@
 use std::{
-    cell::RefCell,
+    collections::HashMap,
     fs::File,
     io::{BufRead, BufReader},
-    time::{Instant, Duration}, collections::{HashSet, HashMap},
+    time::Instant,
 };
 
-use color::Color;
+
 use flate2::read::GzDecoder;
 use rand::{
     prelude::{IteratorRandom, SliceRandom, ThreadRng},
-    Rng,
 };
 use tfrecord::{ExampleWriter, Feature, RecordWriter};
 
-use crate::{entry::Entry, sample::{Sample, Reservoir}};
+use crate::{
+    entry::Entry,
+    sample::{Reservoir, Sample},
+};
 
 mod color;
 mod entry;
@@ -86,20 +88,18 @@ fn main() {
     //156353085: 160353085 total entries - 2000*2000 white pixels at the end
     let entries = f
         .lines()
-        .flatten()
-        .map(|line| Entry::from_line(&line))
-        .flatten()
+        .flatten().filter_map(|line| Entry::from_line(&line))
         .take(take_size);
 
-    
     //Choose OUTPUT pixels randomly, for investigation
-    let samples = Sample::iterate(IMAGE_SIZE as _, IMAGE_SIZE as _).choose_multiple(&mut rng, OUTPUT);
+    let samples =
+        Sample::iterate(IMAGE_SIZE as _, IMAGE_SIZE as _).choose_multiple(&mut rng, OUTPUT);
     println!("Samples: {}", samples.len());
-    
+
     //Create one reservoir for each sample
     let mut examples: HashMap<Sample, Reservoir<Example, ThreadRng>> = HashMap::new();
     for sample in samples {
-        examples.insert(sample, Reservoir::new( rng.clone()));
+        examples.insert(sample, Reservoir::new(rng.clone()));
     }
     println!("Examples: {}", examples.len());
 
@@ -109,10 +109,10 @@ fn main() {
 
     let start = Instant::now();
 
-    for (i, entry) in entries.enumerate(){
+    for (i, entry) in entries.enumerate() {
         if i % (take_size / 1000) == 0 {
             let elapsed = start.elapsed();
-            let fract = (i+1) as f32 / take_size as f32;
+            let fract = (i + 1) as f32 / take_size as f32;
             let eta = elapsed.mul_f32((1.0 - fract) / fract);
             println!(
                 "Decoding {}/{}. {:.2}% Elapsed: {:?} ETA: {:?}",
@@ -126,15 +126,14 @@ fn main() {
         let (x, y) = entry.pos;
 
         //Update reservoir
-        if let Some(reservoir) = examples.get_mut(&Sample(x, y)){
-            if let Some(handle) = reservoir.get_handle(){
-
+        if let Some(reservoir) = examples.get_mut(&Sample(x, y)) {
+            if let Some(handle) = reservoir.get_handle() {
                 let mut o = [1f32; SIZEU * SIZEU * 3];
                 window(&canvas, &mut o, x as isize - MARGIN, y as isize - MARGIN);
-                
-                *handle = Some(Example{
+
+                *handle = Some(Example {
                     palette_index: entry.color.3 as i64,
-                    image: o
+                    image: o,
                 })
             }
         }
@@ -145,11 +144,11 @@ fn main() {
         canvas[index] = entry.color.0;
         canvas[index + 1] = entry.color.1;
         canvas[index + 2] = entry.color.2;
-        
-
     }
 
-    let mut examples: Vec<&Example> = examples.iter().map(|(_, reservoir)|reservoir.get_current()).flatten().collect();
+    let mut examples: Vec<&Example> = examples
+        .iter().filter_map(|(_, reservoir)| reservoir.get_current())
+        .collect();
 
     println!("Example count: {}", examples.len());
 
