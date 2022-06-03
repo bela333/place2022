@@ -28,8 +28,9 @@ def get_model():
     x = layers.MaxPooling2D(pool_size=(3, 3))(x)
     x = layers.Conv2D(filters=64, kernel_size=(3,3), activation="relu")(x)
     x = layers.MaxPooling2D(pool_size=(3, 3))(x)
-    x = layers.Conv2D(filters=64, kernel_size=(3,3), activation="relu")(x)
+    #x = layers.Conv2D(filters=64, kernel_size=(3,3), activation="relu")(x)
     x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense((64+32)//2, activation="relu")(x)
     outputs = layers.Dense(CLASSES, activation="softmax")(x)
     model = keras.Model(inputs=inputs, outputs=outputs)
     return model
